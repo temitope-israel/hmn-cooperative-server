@@ -1,0 +1,23 @@
+# Dependencies
+
+node_modules/
+
+
+# Environment variables -Not to be committed
+.env
+
+# Compiled output
+dist/
+
+# Prisma
+prisma/migrations/dev.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# Logs
+*.log
+npm-debug.log*
+/src/generated/prisma
