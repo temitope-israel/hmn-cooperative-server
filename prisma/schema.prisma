@@ -10,24 +10,20 @@
 //   npm run db:migrate  → updates the database
 //   npm run db:generate → updates the TypeScript client
 
-
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  // Read the DATABASE_URL from my .env
+  // Reads the DATABASE_URL from your .env file
   url = env("DATABASE_URL")
+
 }
 
-
-
-
-// ================= Enums =========================
+// ─── Enums ────────────────────────────────────────────────────────────────────
 // Enums restrict a field to a fixed set of values.
-// TypeScript and PostgreSQL both enforce these for double safety.
+// TypeScript and PostgreSQL both enforce these — double safety.
 
 enum Role {
   admin
@@ -40,39 +36,34 @@ enum EmploymentType {
   contract
 }
 
-
 enum UserStatus {
-pending   // registered but not yet approved
+  pending   // registered but not yet approved
   active    // approved and can log in
   inactive  // deactivated by admin
   rejected  // registration was rejected
 }
 
-
 enum LoanStatus {
-  pending     // application submitted, awaiting review
-  approved    // approved, funds not yet disbursed
-  active      // funds disbursed, repayments ongoing
-  completed // fully repaid
-  declined  // application was rejected
-  defaulted   // severely overdue
+  pending    // application submitted, awaiting review
+  approved   // approved, funds not yet disbursed
+  active     // funds disbursed, repayments ongoing
+  completed  // fully repaid
+  declined   // application was rejected
+  defaulted  // severely overdue
 }
 
 enum RepaymentStatus {
-pending   // not yet due
-paid      // paid on time
-overdue   // past due date, not paid
-partial   // partially paid
+  pending   // not yet due
+  paid      // paid on time
+  overdue   // past due date, not paid
+  partial   // partially paid
 }
-
-
 
 enum ContributionStatus {
   pending
   paid
   missed
 }
-
 
 enum PaymentType {
   contribution
@@ -99,60 +90,74 @@ enum ApprovalStatus {
   rejected
 }
 
+// ─── Models (Tables) ──────────────────────────────────────────────────────────
 
-
-
-// ============== Models (Tables) =========================
 // TABLE 1: users
 // Stores login credentials and role for every system user.
 // Separated from members so we can have admin accounts
 // that aren't cooperative members.
-
-
 model User {
-  id String @id @default(uuid())
-  email String  @unique
-  passwordHash  String  @map("password_hash")
-  role  Role  @default(member)
-  status UserStatus @default(pending)
-  isActive Boolean @default(false) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  role         Role       @default(member)
+  status       UserStatus @default(pending)
+  isActive     Boolean    @default(false) @map("is_active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
 
+  // Relations — one user can have one member profile
+  member            Member?
+  approvalRequest   ApprovalRequest?
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  createdAnnouncements Announcement[]
+  createdPolls      Poll[]
+  updatedSettings   Setting[]
 
-
-// Relations - one user can have one member profile
-member Member?
-approvalRequest ApprovalRequest?
-notifications Notification[]
-auditLogs AuditLog[]
-createdAnnouncements Announcement[]
-createdPolls Poll[]
-updatedSettings Setting[]
-
-@@map("users") // the actual PostgreSQL table name
+  @@map("users") // the actual PostgreSQL table name
 }
 
-
 // TABLE 2: members
-// The cooperative member profile - linked to a user account.
+// The cooperative member profile — linked to a user account.
 // Contains all personal, employment, and bank details.
-
 model Member {
-  id String @id @default(uuid())
-  userId String @unique @map("user_id")
-  memberNo String @unique @map("member_no")   // HMN-0001
-  staffId String @unique @map("staff_id")     // Honda employee ID
+  id             String         @id @default(uuid())
+  userId         String         @unique @map("user_id")
+  memberNo       String         @unique @map("member_no")  // HMN-0001
+  staffId        String         @unique @map("staff_id")   // Honda employee ID
   employmentType EmploymentType @map("employment_type")
-  fullName String @(full_name)
-  department String
-  phone String
-  photoUrl String? @map("photo_url")
-  bankName String @map("bank_name")
-  accountNo String @map("account_no")
-  joinedAt DateTime @default(now()) @map("joined_at")
-  updateAt DateTime @updateAt @map("updated_at")
+  fullName       String         @map("full_name")
+  department     String
+  phone          String
+  photoUrl       String?        @map("photo_url")
+  bankName       String         @map("bank_name")
+  accountNo      String         @map("account_no")
+  joinedAt       DateTime       @default(now()) @map("joined_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
+  // Relations
+  user          User           @relation(fields: [userId], references: [id])
+  contributions Contribution[]
+  loans         Loan[]
+  payments      Payment[]
+  dividends     Dividend[]
+  withdrawals   WithdrawalRequest[]
+
+  @@map("members")
+}
+
+// TABLE 3: approval_requests
+// Tracks the admin review process for new member registrations.
+// Created automatically when someone registers.
+model ApprovalRequest {
+  id             String         @id @default(uuid())
+  userId         String         @unique @map("user_id")
+  status         ApprovalStatus @default(pending)
+  reviewedBy     String?        @map("reviewed_by")  // admin user ID
+  rejectionReason String?       @map("rejection_reason")
+  submittedAt    DateTime       @default(now()) @map("submitted_at")
+  reviewedAt     DateTime?      @map("reviewed_at")
 
   // Relations
   user User @relation(fields: [userId], references: [id])
@@ -160,75 +165,226 @@ model Member {
   @@map("approval_requests")
 }
 
-
-// TABLE 4: ContributionStatus
+// TABLE 4: contributions
 // Tracks each member's monthly savings contributions.
 // One record per member per month.
 model Contribution {
-  id String @id @default(uuid())
-  memberId String @map("member_id")
-  amount Decimal @db.Decimal(12, 2)
-  month DateTime      // First day of the contribution month
-  status ContributionStatus @default(pending)
-  paymentId String? @unique @map("payment_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
+  id        String             @id @default(uuid())
+  memberId  String             @map("member_id")
+  amount    Decimal            @db.Decimal(12, 2)
+  month     DateTime           // first day of the contribution month
+  status    ContributionStatus @default(pending)
+  paymentId String?            @unique @map("payment_id")
+  createdAt DateTime           @default(now()) @map("created_at")
 
   // Relations
-  member Member @relation(fields: [memberId], references: [id])
-  payment Payment? @relation(fields: [paymentId], references:[id])
-
+  member  Member   @relation(fields: [memberId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
 
   @@unique([memberId, month]) // one contribution record per member per month
   @@map("contributions")
 }
 
-
 // TABLE 5: loans
-// The core loan record - tracks application through to completion.
+// The core loan record — tracks application through to completion.
 model Loan {
-  id String @id @default(uuid())
-  memberId String @map("member_id")
-  amount Decimal @db.Decimal(12, 2)
-  maxEligible Decimal @map("max_eligible") @db.Decimal(12, 2)
-  purpose String
-  interestRate Decimal @map("interest_rate") @db.Decimal(5, 2) // e.g. 5.00 for 5%
-  durationMonths Int @map("duration_months")
-  status LoanStatus @default(pending)
-  approvedBy String? @map("approved_by")
-  disbursedAt DateTime? @map("disbursed_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
+  id           String     @id @default(uuid())
+  memberId     String     @map("member_id")
+  amount       Decimal    @db.Decimal(12, 2)
+  maxEligible  Decimal    @map("max_eligible") @db.Decimal(12, 2)
+  purpose      String
+  interestRate Decimal    @map("interest_rate") @db.Decimal(5, 2) // e.g. 5.00 for 5%
+  durationMonths Int      @map("duration_months")
+  status       LoanStatus @default(pending)
+  approvedBy   String?    @map("approved_by")
+  disbursedAt  DateTime?  @map("disbursed_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  member Member @relation(fields: [memberId], references: [id])
+  member     Member          @relation(fields: [memberId], references: [id])
   repayments LoanRepayment[]
 
   @@map("loans")
 }
 
-
-// TABLE 6: loans_repayments
+// TABLE 6: loan_repayments
 // The auto-generated repayment schedule for each loan.
 // One record per monthly instalment.
-// Example: #300k loan over 12 months = 12 rows in this table.
-
+// Example: ₦300k loan over 12 months = 12 rows in this table.
 model LoanRepayment {
-  id String @id @default(uuid())
-  loanId String @map("loan_id")
-  dueDate DateTime @map("due_date")
-  amountDue Decimal @map("amount_due") @db.Decimal(12, 2)
-  amountPaid Decimal @default(0) @map("amount_paid") @db.Decimal(12, 2)
-  status RepaymentStatus @default(pending)
-  paymentId String? @unique @map("payment_id")
-  paidAt DateTime? @map("paid_at")
-
+  id          String          @id @default(uuid())
+  loanId      String          @map("loan_id")
+  dueDate     DateTime        @map("due_date")
+  amountDue   Decimal         @map("amount_due") @db.Decimal(12, 2)
+  amountPaid  Decimal         @default(0) @map("amount_paid") @db.Decimal(12, 2)
+  status      RepaymentStatus @default(pending)
+  paymentId   String?         @unique @map("payment_id")
+  paidAt      DateTime?       @map("paid_at")
 
   // Relations
-  loan Loan @relation(fields: [loanId], references: [id])
+  loan    Loan     @relation(fields: [loanId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
 
   @@map("loan_repayments")
 }
 
 // TABLE 7: payments
+// Central record of every Paystack transaction.
+// Both contributions and loan repayments create a payment record.
+// The webhook updates this record when Paystack confirms payment.
+model Payment {
+  id           String        @id @default(uuid())
+  memberId     String        @map("member_id")
+  reference    String        @unique  // Paystack transaction reference
+  amount       Decimal       @db.Decimal(12, 2)
+  type         PaymentType
+  status       PaymentStatus @default(pending)
+  paystackId   String?       @map("paystack_id")
+  paidAt       DateTime?     @map("paid_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  member       Member         @relation(fields: [memberId], references: [id])
+  contribution Contribution?
+  repayment    LoanRepayment?
+
+  @@map("payments")
+}
+
+// TABLE 8: withdrawal_requests
+// Members request to withdraw from savings.
+// Admin reviews, approves or rejects.
+// On approval, Paystack disburses to member's bank account.
+model WithdrawalRequest {
+  id             String           @id @default(uuid())
+  memberId       String           @map("member_id")
+  amount         Decimal          @db.Decimal(12, 2)
+  reason         String
+  status         WithdrawalStatus @default(pending)
+  reviewedBy     String?          @map("reviewed_by")
+  rejectionReason String?         @map("rejection_reason")
+  disbursedAt    DateTime?        @map("disbursed_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  reviewedAt     DateTime?        @map("reviewed_at")
+
+  // Relations
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("withdrawal_requests")
+}
+
+// TABLE 9: dividends
+// Year-end profit sharing per member.
+// Calculated based on each member's average savings balance for the year.
+model Dividend {
+  id           String   @id @default(uuid())
+  memberId     String   @map("member_id")
+  year         Int
+  amount       Decimal  @db.Decimal(12, 2)
+  basisSavings Decimal  @map("basis_savings") @db.Decimal(12, 2)
+  paidAt       DateTime? @map("paid_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@unique([memberId, year]) // one dividend record per member per year
+  @@map("dividends")
+}
+
+// TABLE 10: notifications
+// In-app alerts sent to individual users.
+// Read/unread state tracked per notification.
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String
+  type      String   // "contribution", "loan", "approval", "overdue" etc.
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+// TABLE 11: announcements
+// Cooperative-wide notices posted by admin or treasurer.
+// Visible to all members on their dashboard.
+model Announcement {
+  id            String   @id @default(uuid())
+  createdBy     String   @map("created_by")
+  title         String
+  body          String
+  attachmentUrl String?  @map("attachment_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  creator User @relation(fields: [createdBy], references: [id])
+
+  @@map("announcements")
+}
+
+// TABLE 12: polls
+// Voting on cooperative decisions.
+// Options stored as JSON — flexible for any number of choices.
+model Poll {
+  id        String   @id @default(uuid())
+  question  String
+  options   Json     // e.g. ["Increase loan limit", "Keep current limit"]
+  votes     Json     @default("{}") // e.g. {"option_0": ["userId1", "userId2"]}
+  createdBy String   @map("created_by")
+  closesAt  DateTime @map("closes_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  creator User @relation(fields: [createdBy], references: [id])
+
+  @@map("polls")
+}
+
+// TABLE 13: audit_logs
+// Immutable record of every significant action in the system.
+// Who did what, to which record, and when.
+// Critical for a financial application — provides accountability.
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String   // e.g. "APPROVE_LOAN", "UPDATE_MEMBER", "RECORD_PAYMENT"
+  entity    String   // e.g. "Loan", "Member", "Contribution"
+  entityId  String   @map("entity_id")
+  oldValue  Json?    @map("old_value")  // state before the change
+  newValue  Json?    @map("new_value")  // state after the change
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// TABLE 14: settings
+// Key-value store for configurable cooperative rules.
+// Admin changes these from the Settings page — no code changes needed.
+// Examples:
+//   loan_multiplier_regular = "2.0"
+//   loan_multiplier_contract = "1.5"
+//   min_savings_balance = "50000"
+//   interest_rate = "5.0"
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  label     String   // human-readable description for the settings UI
+  updatedBy String?  @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  updatedByUser User? @relation(fields: [updatedBy], references: [id])
+
+  @@map("settings")
+}
